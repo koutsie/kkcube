@@ -1,3 +1,9 @@
+#ifdef PROFILE_BUILD
+#define LOOP_LIMIT 2048
+#else
+#define LOOP_LIMIT -1
+#endif
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -6,6 +12,7 @@
 #include <assert.h>
 #include <termios.h>
 #include <getopt.h>
+#include <ncurses.h>
 
 // Common FPS limits:
 
@@ -96,12 +103,13 @@ void get_terminal_size(size_t *r, size_t *c)
     printf("\033[u");
 }
 
-void plot_char(int x, int y, char k)
+// GO SPEEDY BOY GO !
+static inline void plot_char(int x, int y, char k)
 {
     printf("\033[%d;%dH\033[33m%c\033[0m", y, x, 'k');
 }
 
-void draw_line_low(int x0, int y0, int x1, int y1, char c)
+static inline void draw_line_low(int x0, int y0, int x1, int y1, char c)
 {
     int x = x0;
     int y = y0;
@@ -125,7 +133,7 @@ void draw_line_low(int x0, int y0, int x1, int y1, char c)
     }
 }
 
-void draw_line_high(int x0, int y0, int x1, int y1, char c)
+static inline void draw_line_high(int x0, int y0, int x1, int y1, char c)
 {
     int x = x0;
     int y = y0;
@@ -154,7 +162,7 @@ void draw_line(int x0, int y0, int x1, int y1, char c)
 {
     int dx = x1 - x0;
     int dy = y1 - y0;
-    if (abs(dy) < abs(dx))
+    if (dy * dy < dx * dx) // we turned ABS off :)
     {
         if (x0 > x1)
             draw_line_low(x1, y1, x0, y0, c);
@@ -170,23 +178,37 @@ void draw_line(int x0, int y0, int x1, int y1, char c)
     }
 }
 
-void draw(size_t edge_count, mat_t *vertices, edge_t *edges)
+static inline void draw(size_t edge_count, mat_t *vertices, edge_t *edges)
 {
     float a[2];
     float b[2];
-
-    for (size_t i = 0; i < edge_count; i++)
+    // Unrolled this loop, again I do not think at this stage
+    // it really matters in the grand scheme of things.
+    for (size_t i = 0; i < edge_count; i += 4)
     {
-        size_t ai = edges[i].a;
-        size_t bi = edges[i].b;
+        size_t ai0 = edges[i].a;
+        size_t bi0 = edges[i].b;
+        float a0[2] = {vertices->data[ai0], vertices->data[ai0 + vertices->size.columns]};
+        float b0[2] = {vertices->data[bi0], vertices->data[bi0 + vertices->size.columns]};
+        draw_line(a0[0], a0[1], b0[0], b0[1], 'C');
 
-        a[0] = vertices->data[ai];
-        a[1] = vertices->data[ai + vertices->size.columns];
+        size_t ai1 = edges[i + 1].a;
+        size_t bi1 = edges[i + 1].b;
+        float a1[2] = {vertices->data[ai1], vertices->data[ai1 + vertices->size.columns]};
+        float b1[2] = {vertices->data[bi1], vertices->data[bi1 + vertices->size.columns]};
+        draw_line(a1[0], a1[1], b1[0], b1[1], 'C');
 
-        b[0] = vertices->data[bi];
-        b[1] = vertices->data[bi + vertices->size.columns];
+        size_t ai2 = edges[i + 2].a;
+        size_t bi2 = edges[i + 2].b;
+        float a2[2] = {vertices->data[ai2], vertices->data[ai2 + vertices->size.columns]};
+        float b2[2] = {vertices->data[bi2], vertices->data[bi2 + vertices->size.columns]};
+        draw_line(a2[0], a2[1], b2[0], b2[1], 'C');
 
-        draw_line(a[0], a[1], b[0], b[1], 'C');
+        size_t ai3 = edges[i + 3].a;
+        size_t bi3 = edges[i + 3].b;
+        float a3[2] = {vertices->data[ai3], vertices->data[ai3 + vertices->size.columns]};
+        float b3[2] = {vertices->data[bi3], vertices->data[bi3 + vertices->size.columns]};
+        draw_line(a3[0], a3[1], b3[0], b3[1], 'C');
     }
 }
 
@@ -216,6 +238,9 @@ static inline void mat_multiply(mat_t *out, mat_t *a, mat_t *b)
 }
 
 // Rotation matrix of angle r about axis <xyz> -> m
+// Thu Mar 30 07:41:27 AM EEST 2023:
+// Now using some variable magic to avoid redundant calculations - tho
+// at this stage I do not think it matters much.
 static inline void mat_rotation(mat_t *m, float x, float y, float z, float r)
 {
     const float *out = m->data;
@@ -224,19 +249,23 @@ static inline void mat_rotation(mat_t *m, float x, float y, float z, float r)
     const float oc = 1 - c;
     const float s = sinf(r);
 
-    m->data[0] = c + x * x * oc;
+    const float xxoc = x * x * oc;
+    const float yyoc = y * y * oc;
+    const float zzoc = z * z * oc;
+
+    m->data[0] = c + xxoc;
     m->data[1] = x * y * oc - z * s;
     m->data[2] = x * z * oc + y * s;
     m->data[3] = 0;
 
     m->data[4] = y * x * oc + z * s;
-    m->data[5] = c + y * y * oc;
+    m->data[5] = c + yyoc;
     m->data[6] = y * z * oc - x * s;
     m->data[7] = 0;
 
     m->data[8] = z * x * oc - y * s;
     m->data[9] = z * y * oc + x * s;
-    m->data[10] = c + z * z * oc;
+    m->data[10] = c + zzoc;
     m->data[11] = 0;
 
     m->data[12] = 0;
@@ -340,7 +369,6 @@ int main(int argc, char **argv)
     // Tuples of vertex indices which are connected by edges
     edge_t edges[12] = {
         {0, 1}, {1, 3}, {3, 2}, {2, 0}, {4, 5}, {5, 7}, {7, 6}, {6, 4}, {0, 4}, {1, 5}, {2, 6}, {3, 7}};
-
     // Get the terminal size to determine how to scale the cube.
     size_t trows;
     size_t tcols;
@@ -383,7 +411,8 @@ int main(int argc, char **argv)
         .size = {4, 4},
         .data = working_data};
 
-    while (1)
+    int loop_count = 0;
+    while (loop_count < LOOP_LIMIT || LOOP_LIMIT == -1)
     {
         clear_screen();
         time++;
@@ -406,6 +435,11 @@ int main(int argc, char **argv)
 
         if (usleep(frametime))
             break;
+        loop_count++;
+        if (loop_count == LOOP_LIMIT && LOOP_LIMIT != -1)
+        {
+            return 0;
+        }
     }
 
     return 0;

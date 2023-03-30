@@ -7,7 +7,12 @@ kkcube: cube.c
 build_optimize: CFLAGS+=-O3 -march=native -funroll-loops
 build_optimize: kkcube
 
-.PHONY: build_optimize clean
+# You might be asking - why - I do not know either.
+# gprof kkcube | gprof2dot | dot -Tpng -o output.png
+profile: CFLAGS+=-pg -DPROFILE_BUILD
+profile: kkcube
+
+.PHONY: build_optimize profile clean
 
 clean:
-	rm -f kkcube 
+	rm -f kkcube gmon.out
