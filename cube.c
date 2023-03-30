@@ -12,7 +12,6 @@
 #include <assert.h>
 #include <termios.h>
 #include <getopt.h>
-#include <ncurses.h>
 
 // Common FPS limits:
 
