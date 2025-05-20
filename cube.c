@@ -6,12 +6,14 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <math.h>
 #include <assert.h>
 #include <termios.h>
 #include <getopt.h>
+#include <immintrin.h>
 
 // Common FPS limits:
 
@@ -278,22 +280,26 @@ static inline void mat_copy(mat_t *dest, mat_t *source)
     assert(dest->size.rows == source->size.rows);
     assert(dest->size.columns == source->size.columns);
 
-    if (dest->size.rows == source->size.rows && dest->size.columns == source->size.columns)
+    size_t total = dest->size.rows * dest->size.columns;
+    if (total == 16 && ((uintptr_t)dest->data % 32 == 0) && ((uintptr_t)source->data % 32 == 0))
     {
-        // Same size: use a loop to copy values
-        for (size_t r = 0; r < dest->size.rows; r++)
-        {
-            for (size_t c = 0; c < dest->size.columns; c++)
-            {
-                dest->data[r * dest->size.columns + c] = source->data[r * source->size.columns + c];
-            }
-        }
+        // changed to avx2 beacause why doesnt have a avx compatible cpu in 2025?
+        __m256 a = _mm256_load_ps(source->data);
+        __m256 b = _mm256_load_ps(source->data + 8);
+        _mm256_store_ps(dest->data, a);
+        _mm256_store_ps(dest->data + 8, b);
     }
     else
     {
-        // Different size: use memmove to handle overlapping memory regions
-        size_t bytes = dest->size.rows * dest->size.columns * sizeof(float);
-        memmove(dest->data, source->data, bytes);
+        if (dest->size.rows == source->size.rows && dest->size.columns == source->size.columns)
+        {
+            memcpy(dest->data, source->data, total * sizeof(float));
+        }
+        else
+        {
+            size_t bytes = dest->size.rows * dest->size.columns * sizeof(float);
+            memmove(dest->data, source->data, bytes);
+        }
     }
 }
 
